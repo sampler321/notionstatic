@@ -1,0 +1,11 @@
+/* Mobile: when the menu is hidden as "more", its button becomes a search button. */
+header.notion-topbar-mobile [aria-label="More actions"] { position: relative; }
+header.notion-topbar-mobile [aria-label="More actions"] svg { visibility: hidden; }
+header.notion-topbar-mobile [aria-label="More actions"]::after {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 20px; height: 20px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='8.5' cy='8.5' r='6' fill='none' stroke='black' stroke-width='1.6'/%3E%3Cpath d='M13 13l5 5' stroke='black' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='8.5' cy='8.5' r='6' fill='none' stroke='black' stroke-width='1.6'/%3E%3Cpath d='M13 13l5 5' stroke='black' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+/* "more" also hides the desktop ⋯ button, so the mobile one must stay visible. */
+header.notion-topbar-mobile [role="button"][aria-label="More actions"] { display: inline-flex !important; }
+body.ns-searching .notion-overlay-container [role=menu] { opacity: 0; }

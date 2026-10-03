@@ -1,0 +1,14 @@
+/* Notion's Prism (code highlighting) colors, extracted from its light-theme stylesheet (renderer/recon/extract-prism.mjs). */
+.ns-code-block code[class*=language-],.ns-code-block pre[class*=language-]{color:#000;text-shadow:0 1px #fff;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;tab-size:4;hyphens:none;background:0 0;font-family:Consolas,Monaco,Andale Mono,Ubuntu Mono,monospace;font-size:1em;line-height:1.5}
+.ns-code-block pre[class*=language-] ::-moz-selection{text-shadow:none;background:#b3d4fc}
+.ns-code-block code[class*=language-] ::-moz-selection{text-shadow:none;background:#b3d4fc}
+.ns-code-block pre[class*=language-] ::selection{text-shadow:none;background:#b3d4fc}
+.ns-code-block code[class*=language-] ::selection{text-shadow:none;background:#b3d4fc}
+.ns-code-block pre[class*=language-]{margin:.5em 0;padding:1em;overflow:auto}
+.ns-code-block :not(pre)>code[class*=language-]{white-space:normal;border-radius:.3em;padding:.1em}
+.ns-code-block .token.punctuation{color:#999}
+.ns-code-block .token.property,.ns-code-block .token.tag,.ns-code-block .token.boolean,.ns-code-block .token.number,.ns-code-block .token.constant,.ns-code-block .token.symbol,.ns-code-block .token.deleted{color:#905}
+.ns-code-block .token.operator,.ns-code-block .token.entity,.ns-code-block .token.url,.ns-code-block .language-css .token.string,.ns-code-block .style .token.string{color:#9a6e3a;background:rgba(255,255,255,.5)}
+.ns-code-block .token.function,.ns-code-block .token.class-name{color:#dd4a68}
+.ns-code-block .token.important,.ns-code-block .token.bold{font-weight:700}
+.ns-code-block .token.entity{cursor:help}

@@ -1,0 +1,18 @@
+---
+// Served by Cloudflare for unknown paths (not_found_handling = "404-page").
+import "../styles/notion-vars.css";
+import "../styles/notion.css";
+import { load, title } from "../lib/data.mjs";
+const { site, root } = load();
+const theme = site.astro || {};
+---
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Page not found | {title(root)}</title><meta name="robots" content="noindex" /></head>
+<body>
+  {theme.fontFace && <style is:inline set:html={theme.fontFace} />}
+  {theme.css && <style is:inline set:html={theme.css} />}
+  <main class="ns-page"><div class="ns-page-header"><h1 class="ns-title">Page not found</h1></div>
+    <div class="ns-content"><div class="ns-block ns-text"><div class="ns-leaf">This page doesn't exist (anymore). <a class="ns-link" href="/"><span class="ns-link-u">Go to {title(root)}</span></a></div></div></div></main>
+</body>
+</html>

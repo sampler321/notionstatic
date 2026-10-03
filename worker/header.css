@@ -1,0 +1,7 @@
+/* headerWidth: "content". The client script sets --ns-left/--ns-right from the page's content column. */
+.notion-topbar > div,
+header.notion-topbar-mobile > div {
+  padding-left: var(--ns-left) !important;
+  padding-right: var(--ns-right) !important;
+  box-sizing: border-box;
+}

@@ -1,0 +1,171 @@
+---
+// A full static page: top bar, page header (icon, title, database properties), blocks,
+// floating outline. The only scripts are search (loaded on demand) and the outline highlight.
+import "../styles/notion-vars.css";
+import "../styles/notion.css";
+import "../styles/notion-prism.css";
+import "katex/dist/katex.min.css";
+import Blocks from "../components/Blocks.astro";
+import Icon from "../components/Icon.astro";
+import { load, title, breadcrumbs, hrefFor, plain, hex } from "../lib/data.mjs";
+import { richText, pillStyle, esc } from "../lib/richtext.mjs";
+
+interface Props { id: string }
+const { id } = Astro.props;
+const { blocks, tables, site, root } = load();
+const page = blocks[id];
+const f = page.format || {};
+const theme = site.astro || {};
+const name = title(id) || "Untitled";
+const siteName = title(root);
+const crumbs = breadcrumbs(id);
+// Notion collapses long trails: first / … / last two.
+const trail = crumbs.length > 3 ? [crumbs[0], null, ...crumbs.slice(-2)] : crumbs;
+const crumbName = (c) => (c.kind === "collection" ? plain(tables.collection?.[c.id]?.name) : title(c.id)) || "Untitled";
+// A database crumb links to the page holding the database.
+const crumbHref = (c) => (c.kind === "collection" ? hrefFor(tables.collection?.[c.id]?.parent_id || "") : hrefFor(c.id));
+
+// Database row: its properties, in the collection's order; empty ones fold under "N more".
+let props = [], hidden = [];
+if (page.parent_table === "collection") {
+  const coll = tables.collection?.[page.parent_id] || {};
+  const vis = Object.fromEntries((coll.format?.property_visibility || []).map((x) => [x.property, x.visibility]));
+  // Display order: as captured from Notion's rendered page at snapshot time, else the visibility list.
+  const captured = load().manifest.layout?.[id]?.properties || [];
+  const byName = Object.fromEntries(Object.entries(coll.schema || {}).map(([k, s]) => [s.name, k]));
+  const listed = (coll.format?.property_visibility || []).map((x) => x.property);
+  const order = [...new Set([...captured.map((n) => byName[n]).filter(Boolean), ...listed, ...Object.keys(coll.schema || {})])];
+  for (const key of order) {
+    const s = coll.schema?.[key];
+    if (!s || key === "title") continue;
+    const v = page.properties?.[key];
+    const empty = !v || (s.type === "checkbox" && plain(v) !== "Yes");
+    (empty || vis[key] === "hide" ? hidden : props).push({ key, s, v });
+  }
+}
+const pills = (s, v) => plain(v).split(",").map((x) => x.trim()).filter(Boolean)
+  .map((x) => `<span class="ns-pill" style="${pillStyle((s.options || []).find((o) => o.value === x)?.color)}">${esc(x)}</span>`).join("");
+
+// Floating outline (Notion's right-edge dashes) when the page has it enabled.
+const headings = [];
+const walk = (ids) => { for (const cid of ids || []) { const b = blocks[cid]; if (!b || b.alive === false) continue; if (["header", "sub_header", "sub_sub_header"].includes(b.type)) headings.push(b); if (["column_list", "column", "callout", "transclusion_container", "toggle"].includes(b.type)) walk(b.content); if (b.type === "transclusion_reference") walk(blocks[b.format?.transclusion_reference_pointer?.id]?.content); if (b.type === "tab") for (const t of b.content || []) walk(blocks[t]?.content); } };
+walk(page.content);
+const outline = f.page_floating_table_of_contents?.state !== "disabled" && headings.length > 1;
+const description = (() => { for (const cid of page.content || []) { const t = plain(blocks[cid]?.properties?.title); if (blocks[cid]?.type === "text" && t.length > 40) return t.slice(0, 200); } return ""; })();
+const small = !!f.page_small_text, full = !!f.page_full_width;
+// Cover: Notion's page_cover_position runs 0 (bottom) .. 1 (top), default 0.5.
+const coverSrc = f.page_cover ? load().image(f.page_cover, id) : null;
+const coverPos = `center ${Math.round((1 - (f.page_cover_position ?? 0.5)) * 100)}%`;
+const trailNames = crumbs.slice(0, -1).map((c) => crumbName(c));
+// theme.hideHomeTitle: the home title duplicates the top bar; keep it for SEO, hide it visually.
+const hideTitle = id === root && !!theme.hideHomeTitle;
+const canonical = hrefFor(id);
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{id === root ? name : `${name} | ${siteName}`}</title>
+  {description && <meta name="description" content={description} />}
+  <meta property="og:title" content={name} />
+  {description && <meta property="og:description" content={description} />}
+  {canonical && <link rel="canonical" href={canonical} />}
+  <meta name="color-scheme" content="light" />
+  {/* ?ns-preview: the search dialog's miniature of this page (no top bar, smaller type). */}
+  <script is:inline>if (location.search.indexOf("ns-preview") >= 0) document.documentElement.classList.add("ns-preview");</script>
+  {/* Fonts: preload the Latin files and declare them in <head>, so text renders in the theme font
+      from the first paint (no flash of a system font). */}
+  {(theme.fontPreload || []).map((href) => <link rel="preload" as="font" type="font/woff2" href={href} crossorigin="anonymous" />)}
+  {theme.fontFace && <style is:inline set:html={theme.fontFace} />}
+  {theme.head && <Fragment set:html={theme.head} />}
+</head>
+<body class:list={[{ "ns-small": small, "ns-full": full }]}>
+  {/* Theme + custom CSS come after Astro's bundled styles so they win the cascade. */}
+  {theme.css && <style is:inline set:html={theme.css} />}
+  <header class="ns-topbar">
+    <nav class="ns-topbar-inner">
+      <div class="ns-crumbs">
+        {trail.map((c, i) => (<>
+          {i > 0 && <span class="ns-crumb-sep">/</span>}
+          {c === null ? <span class="ns-crumb">...</span> : (
+            <a class="ns-crumb" href={crumbHref(c) || undefined}>
+              {c.kind === "page" && blocks[c.id]?.format?.page_icon && <Icon icon={blocks[c.id].format.page_icon} blockId={c.id} size={14} box={18} />}
+              <span>{crumbName(c)}</span>
+            </a>
+          )}
+        </>))}
+      </div>
+      <button class="ns-search-btn" type="button" aria-label="Search" data-ns-search>
+        <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="6" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M13 13l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+      </button>
+    </nav>
+  </header>
+
+  <main class="ns-page" class:list={[{ "ns-has-cover": !!coverSrc }]}>
+    {/* Cover band (an empty one only shows in the search preview's miniature). */}
+    <div class:list={["ns-cover", { "ns-cover-empty": !coverSrc }]}>{coverSrc && <img src={coverSrc} alt="" style={`object-position:${coverPos}`} />}</div>
+    <div class="ns-page-header" class:list={[{ "ns-has-icon": !!f.page_icon, "ns-no-title": hideTitle }]}>
+      {f.page_icon && <div class="ns-page-icon"><Icon icon={f.page_icon} blockId={id} size={78} box={78} /></div>}
+      {trailNames.length > 0 && <div class="ns-page-trail">{trailNames.map((n, i) => (<>{i > 0 && <span class="ns-trail-sep">/</span>}<span>{n}</span></>))}</div>}
+      <h1 class:list={["ns-title", { "ns-sr-only": hideTitle }]} data-block-id={id}>{name}</h1>
+      {props.length > 0 && (
+        <div class="ns-props">
+          {[...props.map((x) => ({ ...x, hide: false })), ...hidden.map((x) => ({ ...x, hide: true }))].map(({ s, v, hide }) => (
+            <div class:list={["ns-prop", { "ns-prop-extra": hide }]} hidden={hide}>
+              <div class="ns-prop-name"><span class={`ns-prop-icon ns-prop-${s.type}`} aria-hidden="true" /><span class="ns-prop-label">{s.name}</span></div>
+              <div class="ns-prop-value" set:html={s.type === "checkbox" ? `<span class="ns-checkbox${plain(v) === "Yes" ? " is-on" : ""}" role="img" aria-label="${plain(v) === "Yes" ? "Checked" : "Unchecked"}"></span>` : s.type === "multi_select" || s.type === "select" ? `<div class="ns-pills">${pills(s, v)}</div>` : v ? richText(v) : `<span class="ns-prop-empty">Empty</span>`} />
+            </div>
+          ))}
+          {hidden.length > 0 && <button type="button" class="ns-props-more" data-props-toggle data-more={`${hidden.length} more ${hidden.length === 1 ? "property" : "properties"}`} data-less={`Hide ${hidden.length} ${hidden.length === 1 ? "property" : "properties"}`} aria-expanded="false"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg><span>{hidden.length} more {hidden.length === 1 ? "property" : "properties"}</span></button>}
+        </div>
+      )}
+    </div>
+    <div class="ns-content">
+      <Blocks ids={page.content || []} pageId={id} />
+    </div>
+  </main>
+
+  {outline && (
+    <aside class="ns-outline" aria-label="On this page">
+      <div class="ns-outline-dashes">{headings.map((h) => <span class={`ns-dash ns-dash-${h.type}`} />)}</div>
+      <div class="ns-outline-panel">{headings.map((h) => <a class={`ns-outline-item ns-outline-${h.type}`} href={`#${hex(h.id)}`}>{plain(h.properties?.title)}</a>)}</div>
+    </aside>
+  )}
+
+  <div class="ns-search" hidden data-site={siteName} data-current={canonical || "/"}>
+    <div class="ns-search-backdrop" data-ns-close></div>
+    <div class="ns-search-dialog" role="dialog" aria-label="Search">
+      <div class="ns-search-head">
+        <svg class="ns-search-glass" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="6" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M13 13l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+        <input type="search" placeholder={`Search in ${siteName}…`} autocomplete="off" spellcheck="false" aria-label="Search" />
+        <button type="button" class="ns-search-toggle" aria-label="Toggle preview" aria-pressed="true" data-ns-toggle-preview>
+          <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2.25" fill="none" stroke="currentColor" stroke-width="1.5" /><rect x="11" y="6" width="4" height="8" rx="1" fill="currentColor" /></svg>
+        </button>
+        <button type="button" class="ns-search-filter" aria-label="Filter and sort" aria-haspopup="true" data-ns-filter>
+          <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M6.5 7.75h7M7.75 10.25h4.5M9 12.75h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+        </button>
+        <div class="ns-search-menu" hidden role="menu">
+          <div class="ns-sm-label">Sort</div>
+          <button type="button" role="menuitemradio" data-sort="relevance" aria-checked="true">Best matches</button>
+          <button type="button" role="menuitemradio" data-sort="newest" aria-checked="false">Last edited: newest first</button>
+          <button type="button" role="menuitemradio" data-sort="oldest" aria-checked="false">Last edited: oldest first</button>
+          <div class="ns-sm-sep"></div>
+          <button type="button" role="menuitemcheckbox" data-titles aria-checked="false">Search titles only</button>
+        </div>
+        <button type="button" class="ns-search-cancel" data-ns-close>Cancel</button>
+      </div>
+      <div class="ns-search-body">
+        <div class="ns-search-list">
+          <div class="ns-search-label"><span data-ns-label>Pages</span><span class="ns-search-sort" data-ns-sort data-ns-filter hidden><span data-ns-sort-label>Best matches</span> <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></span></div>
+          <div class="ns-search-results" role="listbox"></div>
+        </div>
+        <div class="ns-search-preview" aria-hidden="true"></div>
+      </div>
+      <div class="ns-search-foot"><span class="ns-kbd">⌘</span><span class="ns-kbd">↵</span><span>Open in new tab</span></div>
+    </div>
+  </div>
+  <script is:inline src="/_ns/site.js" defer></script>
+  {theme.body && <Fragment set:html={theme.body} />}
+</body>
+</html>

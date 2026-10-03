@@ -1,0 +1,405 @@
+---
+// Renders a list of Notion blocks (recursive). Markup mirrors Notion's box model so the
+// static page lines up with notion.site; every block keeps its id in data-block-id.
+import { load, plain, hrefFor, title as pageTitle, hex, breadcrumbs } from "../lib/data.mjs";
+import { richText, colorStyle, esc } from "../lib/richtext.mjs";
+import Gallery from "./Gallery.astro";
+import Collection from "./Collection.astro";
+import katex from "katex";
+import Prism from "prismjs";
+import loadLanguages from "prismjs/components/index.js";
+import Icon from "./Icon.astro";
+
+interface Props { ids: string[]; pageId: string; depth?: number }
+const { ids = [], pageId, depth = 0 } = Astro.props;
+const { blocks, image } = load();
+const list = ids.map((id) => blocks[id]).filter((b) => b && b.alive !== false);
+
+// Numbered lists count consecutive siblings.
+const numbers = new Map();
+let n = 0;
+for (const b of list) { n = b.type === "numbered_list" ? n + 1 : 0; if (n) numbers.set(b.id, n); }
+
+// Notion's spacing depends on neighbours: runs of list items / page links have 1px between
+// items and 6px at the run's edges; headings get extra top space unless first in their container.
+const GROUPED = new Set(["bulleted_list", "numbered_list", "page", "link_to_page", "alias", "to_do"]);
+const spacing = new Map();
+list.forEach((b, i) => {
+  const prev = list[i - 1]?.type, next = list[i + 1]?.type, cls = [];
+  if (GROUPED.has(b.type)) { if (prev === b.type) cls.push("ns-gp"); if (next === b.type) cls.push("ns-gn"); }
+  if (!prev) cls.push("ns-first");
+  spacing.set(b.id, cls.join(" "));
+});
+// Code: Prism at build time (Notion uses Prism too; its colours live in notion-prism.css).
+const PRISM_LANG = { "plain text": null, javascript: "javascript", typescript: "typescript", python: "python", html: "markup", xml: "markup", css: "css", json: "json", bash: "bash", shell: "bash", sql: "sql", java: "java", "c++": "cpp", c: "c", "c#": "csharp", go: "go", rust: "rust", ruby: "ruby", php: "php", swift: "swift", kotlin: "kotlin", yaml: "yaml", markdown: "markdown", jsx: "jsx", tsx: "tsx", scss: "scss", graphql: "graphql", docker: "docker", diff: "diff" };
+const highlight = (code, language) => {
+  const lang = PRISM_LANG[(language || "").toLowerCase()];
+  if (!lang) return esc(code);
+  try { if (!Prism.languages[lang]) loadLanguages([lang]); return Prism.highlight(code, Prism.languages[lang], lang); } catch { return esc(code); }
+};
+const tex = (s, display) => { try { return katex.renderToString(s || "", { displayMode: display, throwOnError: false, output: "html" }); } catch { return esc(s); } };
+const fileSize = (b) => plain(b.properties?.size);
+const kids = (b) => (b.content || []).filter((c) => blocks[c] && blocks[c].alive !== false);
+const blockColor = (b) => colorStyle(b.format?.block_color, { block: true });
+const headingTag = { header: "h2", sub_header: "h3", sub_sub_header: "h4", header_4: "h5" };
+
+// Columns: width = ratio * (100% - gaps), Notion's 46px gutter.
+// Notion caps each ratio at 1, then normalizes: column gets ratio / sum(ratios) of the space
+// left after the 46px gutters (missing ratios count as an equal share).
+const colWidth = (b, parent) => {
+  const cols = kids(parent);
+  const r = (x) => Math.min(1, x?.format?.column_ratio ?? 1 / cols.length);
+  const sum = cols.reduce((a, c) => a + r(blocks[c]), 0) || 1;
+  const ratio = r(b) / sum;
+  return `calc(${+(ratio * 100).toFixed(4)}% - ${+(ratio * 46 * (cols.length - 1)).toFixed(3)}px)`;
+};
+// Content width below which the narrowest column would drop under 220px -> stack (40px buckets).
+const stackClass = (b) => {
+  const cols = kids(b);
+  if (cols.length < 2) return "";
+  const r = (x) => Math.min(1, x?.format?.column_ratio ?? 1 / cols.length);
+  const sum = cols.reduce((a, c) => a + r(blocks[c]), 0) || 1;
+  const minShare = Math.min(...cols.map((c) => r(blocks[c]) / sum));
+  const need = 220 / minShare + 46 * (cols.length - 1);
+  const bucket = Math.min(720, Math.max(400, Math.ceil(need / 40) * 40));
+  return need >= 400 ? `ns-stack-${bucket}` : "";
+};
+// A column holding only empty text (a spacer that pushes content sideways on desktop) is hidden
+// once the layout stacks, so it doesn't leave a blank gap.
+const isEmptyColumn = (c) => (blocks[c]?.content || []).every((x) => { const v = blocks[x]; return !v || v.alive === false || (v.type === "text" && !plain(v.properties?.title).trim() && !(v.content || []).length); });
+const imgWidth = (b) => {
+  const f = b.format || {};
+  if (f.block_full_width || f.block_page_width) return "100%";
+  return f.block_width ? `min(${f.block_width}px, 100%)` : "100%";
+};
+const tocItems = (b) => {
+  const page = blocks[pageId];
+  const out = [];
+  const walk = (ids, d = 0) => { for (const id of ids || []) { const x = blocks[id]; if (!x || x.alive === false) continue; if (headingTag[x.type]) out.push(x); if (["column_list", "column", "toggle", "callout", "transclusion_container"].includes(x.type) || (x.type === "text" && x.format?.toggleable)) walk(x.content, d + 1); } };
+  walk(page?.content);
+  return out;
+};
+---
+{list.map((b) => {
+  const t = b.type, props = b.properties || {}, f = b.format || {};
+  const id = b.id;
+  const text = richText(props.title);
+
+  if (t === "text") return (
+    <div class={`ns-block ns-text ${spacing.get(id)}`} data-block-id={id} style={blockColor(b)}>
+      {f.toggleable && kids(b).length ? (
+        <details class="ns-toggle-wrap"><summary class="ns-leaf" set:html={text} /><div class="ns-children"><Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} /></div></details>
+      ) : (<>
+        <div class="ns-leaf" set:html={text || "&#8203;"} />
+        {kids(b).length > 0 && <div class="ns-children"><Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} /></div>}
+      </>)}
+    </div>
+  );
+
+  if (headingTag[t]) {
+    const Tag = headingTag[t];
+    const anchor = hex(id);
+    if (f.toggleable) return (
+      <div class={`ns-block ns-heading ns-${t} ${spacing.get(id)}`} data-block-id={id} style={blockColor(b)}>
+        <details class="ns-toggle"><summary><span class="ns-toggle-arrow" aria-hidden="true" /><Tag class="ns-leaf" id={anchor} set:html={text} /></summary>
+          <div class="ns-children"><Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} /></div></details>
+      </div>
+    );
+    return (
+      <div class={`ns-block ns-heading ns-${t} ${spacing.get(id)}`} data-block-id={id} style={blockColor(b)}>
+        <Tag class="ns-leaf" id={anchor} set:html={text} />
+      </div>
+    );
+  }
+
+  if (t === "bulleted_list" || t === "numbered_list") return (
+    <div class={`ns-block ns-list ns-${t} ${spacing.get(id)}`} data-block-id={id} style={blockColor(b)}>
+      <div class="ns-list-row">
+        <div class="ns-marker">{t === "bulleted_list" ? <span class="ns-bullet">•</span> : <span class="ns-number">{numbers.get(id)}.</span>}</div>
+        <div class="ns-list-body">
+          <div class="ns-leaf" set:html={text || "&#8203;"} />
+          {kids(b).length > 0 && <div class="ns-children ns-list-children"><Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} /></div>}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (t === "toggle") return (
+    <div class="ns-block ns-list ns-toggle-block" data-block-id={id} style={blockColor(b)}>
+      <details class="ns-toggle">
+        <summary class="ns-list-row"><div class="ns-marker"><span class="ns-toggle-arrow" aria-hidden="true" /></div><div class="ns-leaf" set:html={text} /></summary>
+        <div class="ns-children ns-toggle-children"><Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} /></div>
+      </details>
+    </div>
+  );
+
+  if (t === "quote") return (
+    <div class="ns-block ns-quote" data-block-id={id} style={blockColor(b)}>
+      <blockquote><div class="ns-quote-bar"><div class="ns-leaf" set:html={text} />
+        {kids(b).length > 0 && <Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} />}</div></blockquote>
+    </div>
+  );
+
+  if (t === "callout") return (
+    <div class="ns-block ns-callout" data-block-id={id}>
+      <div class="ns-callout-box" style={blockColor(b) || "background:var(--c-graBacPri)"}>
+        {f.page_icon && <div class="ns-callout-icon"><Icon icon={f.page_icon} blockId={id} size={16.8} box={24} /></div>}
+        <div class="ns-callout-body">
+          {(text || !kids(b).length) && <div class="ns-leaf" set:html={text} />}
+          {kids(b).length > 0 && <Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} />}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (t === "divider") return <div class="ns-block ns-divider" data-block-id={id}><div class="ns-divider-line" /></div>;
+
+  if (t === "image") {
+    const src = image(props.source?.[0]?.[0] || f.display_source, id);
+    const caption = richText(props.caption);
+    return (
+      <div class="ns-block ns-image" data-block-id={id}>
+        <figure style={`width:${imgWidth(b)}`}>
+          <div class="ns-image-frame">{src ? <img src={src} alt={plain(props.caption) || ""} loading="lazy" decoding="async" data-zoom /> : <div class="ns-image-missing" />}
+            {src && <button type="button" class="ns-block-more" aria-label="Open block actions menu" data-image-menu={src}><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3.2 6.725a1.275 1.275 0 1 0 0 2.55 1.275 1.275 0 0 0 0-2.55m4.8 0a1.275 1.275 0 1 0 0 2.55 1.275 1.275 0 0 0 0-2.55m4.8 0a1.275 1.275 0 1 0 0 2.55 1.275 1.275 0 0 0 0-2.55"/></svg></button>}
+          </div>
+          {caption && <figcaption class="ns-caption" set:html={caption} />}
+        </figure>
+      </div>
+    );
+  }
+
+  if (t === "column_list") return (
+    <div class={`ns-block ns-column-list ${stackClass(b)}`} data-block-id={id}>
+      {kids(b).map((c, i) => (<>
+        {i > 0 && <div class="ns-column-gap" />}
+        <div class={`ns-column${isEmptyColumn(c) ? " ns-column-empty" : ""}`} style={`width:${colWidth(blocks[c], b)}`}>
+          <div class="ns-column-inner" data-block-id={c}><Astro.self ids={kids(blocks[c])} pageId={pageId} depth={depth + 1} /></div>
+        </div>
+      </>))}
+    </div>
+  );
+
+  if (t === "transclusion_container") return <div class="ns-block ns-synced" data-block-id={id}><Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} /></div>;
+  if (t === "transclusion_reference") {
+    const src = blocks[f.transclusion_reference_pointer?.id];
+    return <div class="ns-block ns-synced" data-block-id={id}>{src && <Astro.self ids={kids(src)} pageId={pageId} depth={depth + 1} />}</div>;
+  }
+
+  if (t === "tab") {
+    const tabs = kids(b).map((c) => blocks[c]);
+    const name = `tabs-${hex(id)}`;
+    return (
+      <div class="ns-block ns-tabs" data-block-id={id}>
+        <div class="ns-tabs-box">
+          {tabs.map((tab, i) => <input type="radio" class={`ns-tab-radio ns-tr-${i}`} name={name} id={`${name}-${i}`} checked={i === 0} />)}
+          <div class="ns-tabs-head"><div class="ns-tablist" role="tablist">
+            {tabs.map((tab, i) => <label class={`ns-tab ns-tl-${i}`} for={`${name}-${i}`} role="tab" data-block-id={tab.id} set:html={richText(tab.properties?.title) || "Tab"} />)}
+          </div></div>
+          {tabs.map((tab, i) => <div class={`ns-tab-panel ns-tp-${i}`}><Astro.self ids={kids(tab)} pageId={pageId} depth={depth + 1} /></div>)}
+        </div>
+      </div>
+    );
+  }
+
+  if (t === "table") {
+    const order = f.table_block_column_order || Object.keys(blocks[kids(b)[0]]?.properties || {});
+    const widths = f.table_block_column_format || {};
+    return (
+      <div class="ns-block ns-table" data-block-id={id}>
+        <div class="ns-table-inner"><table><tbody>
+          {kids(b).map((r, ri) => (
+            <tr data-block-id={r}>{order.map((col, ci) => {
+              const head = (f.table_block_column_header && ri === 0) || (f.table_block_row_header && ci === 0);
+              const cell = richText(blocks[r].properties?.[col]);
+              const w = widths[col]?.width ? `min-width:${widths[col].width}px;max-width:${widths[col].width}px` : "";
+              return head ? <th style={w}><div set:html={cell} /></th> : <td style={w}><div set:html={cell} /></td>;
+            })}</tr>
+          ))}
+        </tbody></table></div>
+      </div>
+    );
+  }
+
+  if (t === "table_of_contents") return (
+    <div class="ns-block ns-toc" data-block-id={id} style={blockColor(b)}>
+      {tocItems(b).map((h) => <a class={`ns-toc-item ns-toc-${h.type}`} href={`#${hex(h.id)}`}>{plain(h.properties?.title)}</a>)}
+    </div>
+  );
+
+  if (t === "collection_view" && (load().tables.collection_view?.[(b.view_ids || [])[0]]?.type || "gallery") === "gallery") return <div class="ns-block ns-collection" data-block-id={id}><Gallery block={b} /></div>;
+
+  if (["embed", "maps", "figma", "gist", "codepen", "miro", "typeform", "excalidraw", "framer", "whimsical", "replit", "abstract", "invision", "sketch", "loom"].includes(t)) {
+    const src = props.source?.[0]?.[0] || "";
+    const artifact = f.embed_variant === "html_artifact" && src.match(/attachment:([0-9a-f-]{36}):(.+)$/);
+    const url = artifact ? `/_artifacts/${artifact[1]}/${artifact[2]}` : f.display_source || src;
+    const height = f.block_height || 320;
+    const caption = richText(props.caption);
+    if (t === "bookmark") return <div class="ns-block ns-bookmark" data-block-id={id}><a href={src} target="_blank" rel="noopener">{plain(props.title) || src}</a></div>;
+    return (
+      <div class="ns-block ns-embed" data-block-id={id} style={f.block_width && !f.block_full_width && !f.block_page_width ? `width:min(${f.block_width}px,100%)` : ""}>
+        <figure>
+          {artifact && <div class="ns-embed-label">{artifact[2]}</div>}
+          <div class="ns-embed-tools">
+            {!artifact && url && <a class="ns-block-more" href={src || url} target="_blank" rel="noopener" aria-label="View original media source" title="View original"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M5.5 10.5 10.5 5.5M6.5 5.5h4v4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></a>}
+            <button type="button" class="ns-block-more" aria-label="Open block actions menu" data-embed-menu={artifact ? url : (src || url)}><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3.2 6.725a1.275 1.275 0 1 0 0 2.55 1.275 1.275 0 0 0 0-2.55m4.8 0a1.275 1.275 0 1 0 0 2.55 1.275 1.275 0 0 0 0-2.55m4.8 0a1.275 1.275 0 1 0 0 2.55 1.275 1.275 0 0 0 0-2.55"/></svg></button>
+          </div>
+          <div class={artifact ? "ns-embed-frame ns-embed-artifact" : "ns-embed-frame"}><iframe src={url} title={plain(props.caption) || f.link_title || "embed"} loading="lazy" style={`height:${height}px`}
+            sandbox={artifact ? "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin" : undefined}
+            allowfullscreen /></div>
+          {caption && <figcaption class="ns-caption" set:html={caption} />}
+        </figure>
+      </div>
+    );
+  }
+
+  if (t === "page" || t === "collection_view_page") {
+    const href = hrefFor(id);
+    // Pages that aren't public (skipped by the crawler) stay as plain text, like a dead link would be.
+    const inner = <><Icon icon={f.page_icon} blockId={id} size={18} box={22} fallback="page" /><span class="ns-page-link-title">{pageTitle(id) || "Untitled"}</span></>;
+    return <div class={`ns-block ns-page-link ${spacing.get(id)}`} data-block-id={id}>{href ? <a href={href}>{inner}</a> : <span class="ns-page-link-private">{inner}</span>}</div>;
+  }
+
+  if (t === "link_to_page") {
+    const target = b.properties?.title ? null : f.alias_pointer?.id || null;
+    const href = target && hrefFor(target);
+    return href ? <div class="ns-block ns-page-link" data-block-id={id}><a href={href}><Icon icon={blocks[target]?.format?.page_icon} blockId={target} size={18} box={22} fallback="page" /><span class="ns-page-link-title">{pageTitle(target)}</span></a></div> : null;
+  }
+
+  if (t === "to_do") {
+    const done = plain(props.checked) === "Yes";
+    return (
+      <div class={`ns-block ns-list ns-to_do ${spacing.get(id)}`} data-block-id={id} style={blockColor(b)}>
+        <div class="ns-list-row">
+          <div class="ns-marker"><span class:list={["ns-checkbox", { "is-on": done }]} role="img" aria-label={done ? "Checked" : "Unchecked"} /></div>
+          <div class="ns-list-body">
+            <div class:list={["ns-leaf", { "ns-done": done }]} set:html={text || "&#8203;"} />
+            {kids(b).length > 0 && <div class="ns-children ns-list-children"><Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} /></div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (t === "code") {
+    const code = plain(props.title);
+    const language = plain(props.language) || "Plain Text";
+    const caption = richText(props.caption);
+    return (
+      <div class="ns-block ns-code-block" data-block-id={id}>
+        <div class="ns-code-box">
+          <div class="ns-code-head"><span class="ns-code-lang">{language}</span><button type="button" class="ns-code-copy" data-copy-code>Copy</button></div>
+          <pre class={`language-${(PRISM_LANG[language.toLowerCase()] || "none")}`}><code set:html={highlight(code, language)} /></pre>
+        </div>
+        {caption && <div class="ns-caption" set:html={caption} />}
+      </div>
+    );
+  }
+
+  if (t === "equation") return <div class="ns-block ns-equation-block" data-block-id={id}><div class="ns-equation-box" set:html={tex(plain(props.title), true)} /></div>;
+
+  if (t === "bookmark") {
+    const link = plain(props.link) || plain(props.title);
+    const caption = richText(props.caption);
+    const icon = f.bookmark_icon && image(f.bookmark_icon, id);
+    const coverImg = f.bookmark_cover && image(f.bookmark_cover, id);
+    return (
+      <div class="ns-block ns-bookmark" data-block-id={id}>
+        <a class="ns-bookmark-card" href={link} target="_blank" rel="noopener">
+          <div class="ns-bookmark-text">
+            <div class="ns-bookmark-title">{plain(props.title) || link}</div>
+            {plain(props.description) && <div class="ns-bookmark-desc">{plain(props.description)}</div>}
+            <div class="ns-bookmark-url">{icon && <img src={icon} alt="" />}<span>{link}</span></div>
+          </div>
+          {coverImg && <div class="ns-bookmark-cover"><img src={coverImg} alt="" loading="lazy" /></div>}
+        </a>
+        {caption && <div class="ns-caption" set:html={caption} />}
+      </div>
+    );
+  }
+
+  if (t === "video" || t === "audio" || t === "file" || t === "pdf") {
+    const src = props.source?.[0]?.[0] || f.display_source || "";
+    const local = image(src, id);
+    const url = local || f.display_source || src;
+    const caption = richText(props.caption);
+    const name = plain(props.title) || decodeURIComponent((src.split("/").pop() || "file").split("?")[0]);
+    const external = /youtube\.com|youtu\.be|vimeo\.com|loom\.com/.test(src) || (f.display_source && !local && t === "video");
+    return (
+      <div class={`ns-block ns-media ns-${t}`} data-block-id={id} style={f.block_width && !f.block_full_width ? `width:min(${f.block_width}px,100%)` : ""}>
+        {t === "video" && (external ? <div class="ns-embed-frame"><iframe src={f.display_source || src} title={name} loading="lazy" allowfullscreen style={`aspect-ratio:${f.block_aspect_ratio ? 1 / f.block_aspect_ratio : 16 / 9};height:auto`} /></div> : <video src={url} controls preload="metadata" playsinline />)}
+        {t === "audio" && <audio src={url} controls preload="metadata" />}
+        {t === "pdf" && <div class="ns-embed-frame"><iframe src={url} title={name} loading="lazy" style={`height:${f.block_height || 600}px`} /></div>}
+        {t === "file" && <a class="ns-file" href={url} download><svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M4.36 15.47h7.28c1.46 0 2.22-.77 2.22-2.24v-6.2c0-.95-.12-1.39-.72-1.99L9.55 1.39C8.98.8 8.51.67 7.65.67H4.36c-1.46 0-2.22.77-2.22 2.24v10.32c0 1.48.76 2.24 2.22 2.24Zm.11-1.34c-.66 0-.99-.35-.99-.99V2.99c0-.63.33-.98.99-.98h2.91v3.75c0 .97.49 1.45 1.46 1.45h3.68v5.94c0 .64-.33.99-1 .99H4.47Z"/></svg><span class="ns-file-name">{name}</span>{fileSize(b) && <span class="ns-file-size">{fileSize(b)}</span>}</a>}
+        {caption && <div class="ns-caption" set:html={caption} />}
+      </div>
+    );
+  }
+
+  if (t === "breadcrumb") {
+    const trail = breadcrumbs(pageId);
+    return (
+      <div class="ns-block ns-breadcrumb" data-block-id={id}>
+        {trail.map((c, i) => (<>
+          {i > 0 && <span class="ns-crumb-sep">/</span>}
+          <a class="ns-crumb" href={(c.kind === "collection" ? hrefFor(load().tables.collection?.[c.id]?.parent_id || "") : hrefFor(c.id)) || undefined}>
+            {c.kind === "page" && blocks[c.id]?.format?.page_icon && <Icon icon={blocks[c.id].format.page_icon} blockId={c.id} size={14} box={18} />}
+            <span>{c.kind === "collection" ? plain(load().tables.collection?.[c.id]?.name) : pageTitle(c.id)}</span>
+          </a>
+        </>))}
+      </div>
+    );
+  }
+
+  if (t === "alias") {
+    const target = f.alias_pointer?.id;
+    const href = target && hrefFor(target);
+    // Link-to-page: Notion marks the icon with a small ↗ badge (the page lives elsewhere).
+    const inner = <><span class="ns-alias-icon"><Icon icon={blocks[target]?.format?.page_icon} blockId={target} size={18} box={22} fallback="page" /><svg class="ns-alias-badge" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 7 7 3M4 3h3v3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="ns-page-link-title">{pageTitle(target) || "Untitled"}</span></>;
+    return <div class={`ns-block ns-page-link ns-alias ${spacing.get(id)}`} data-block-id={id}>{href ? <a href={href}>{inner}</a> : <span class="ns-page-link-private">{inner}</span>}</div>;
+  }
+
+  if (t === "collection_view" || t === "collection_view_page") {
+    const viewType = load().tables.collection_view?.[(b.view_ids || [])[0]]?.type;
+    if (viewType && viewType !== "gallery") return <div class="ns-block ns-collection" data-block-id={id}><Collection block={b} /></div>;
+  }
+
+  if (t === "tweet") {
+    const tweetId = (props.source?.[0]?.[0] || "").match(/status\/(\d+)/)?.[1];
+    return <div class="ns-block ns-embed ns-tweet" data-block-id={id}>{tweetId ? <iframe src={`https://platform.twitter.com/embed/Tweet.html?id=${tweetId}&dnt=true`} title="Tweet" loading="lazy" style="height:520px;max-width:550px;width:100%;border:0" /> : <a href={props.source?.[0]?.[0]} target="_blank" rel="noopener">{props.source?.[0]?.[0]}</a>}</div>;
+  }
+
+  if (t === "drive" || t === "external_object_instance") {
+    const d = f.drive_properties || {};
+    const attrs = Object.fromEntries((f.attributes || []).map((a) => [a.id, a.values?.[0]]));
+    const url = d.url || f.uri || f.original_url || "";
+    const name = d.title || attrs.title || url;
+    const icon = d.icon || (f.domain ? `https://www.google.com/s2/favicons?domain=${f.domain}&sz=64` : null);
+    const thumb = d.thumbnail;
+    return (
+      <div class="ns-block ns-bookmark ns-integration" data-block-id={id}>
+        <a class="ns-bookmark-card" href={url} target="_blank" rel="noopener">
+          <div class="ns-bookmark-text">
+            <div class="ns-bookmark-title">{name}</div>
+            {(attrs.description || f.domain) && <div class="ns-bookmark-desc">{attrs.description || ""}</div>}
+            <div class="ns-bookmark-url">{icon && <img src={icon} alt="" />}<span>{f.domain || url}</span></div>
+          </div>
+          {thumb && <div class="ns-bookmark-cover"><img src={thumb} alt="" loading="lazy" /></div>}
+        </a>
+      </div>
+    );
+  }
+
+  if (t === "button") {
+    // Notion buttons run workspace automations; visitors of a public page can't trigger them.
+    return <div class="ns-block ns-button-block" data-block-id={id}><span class="ns-notion-button" style={blockColor(b)} title="Only works inside Notion">{plain(props.title) || "Button"}</span></div>;
+  }
+
+  // Unknown type: keep its text and children so nothing silently disappears.
+  return (
+    <div class={`ns-block ns-unknown ns-type-${t}`} data-block-id={id}>
+      {text && <div class="ns-leaf" set:html={text} />}
+      {kids(b).length > 0 && <Astro.self ids={kids(b)} pageId={pageId} depth={depth + 1} />}
+    </div>
+  );
+})}

@@ -1,0 +1,25 @@
+---
+// One static HTML file per Notion page at Notion's own path ("/" for the root page).
+// Alternative URLs (bare /<id>, the root page's slug) are small redirects, so search and
+// search engines see each page once.
+import Page from "../layouts/Page.astro";
+import { load } from "../lib/data.mjs";
+
+export function getStaticPaths() {
+  const { paths, root } = load();
+  const out = [{ params: { slug: undefined }, props: { id: root } }];
+  for (const [id, path] of Object.entries(paths)) {
+    const main = id === root ? "/" : path;
+    if (id !== root) out.push({ params: { slug: path.slice(1) }, props: { id } });
+    else out.push({ params: { slug: path.slice(1) }, props: { id, redirect: "/" } });
+    const bare = id.replace(/-/g, "");
+    if (path.slice(1) !== bare) out.push({ params: { slug: bare }, props: { id, redirect: main } });
+  }
+  return out;
+}
+const { id, redirect } = Astro.props;
+---
+{redirect ? (
+  <html lang="en"><head><meta charset="utf-8" /><meta http-equiv="refresh" content={`0;url=${redirect}`} /><link rel="canonical" href={redirect} /><meta name="robots" content="noindex" /><title>Redirecting…</title></head>
+  <body><a href={redirect}>Continue</a></body></html>
+) : <Page id={id} />}
