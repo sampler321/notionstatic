@@ -68,6 +68,11 @@ export async function buildAstro(p) {
     }
   }
 
+  if (p.config.optimizeImages !== false && existsSync(join(dist, "_img"))) {
+    const { optimizeImages } = await import("./images.mjs");
+    await optimizeImages(p, dist, pages);
+  }
+
   await mkdir(join(dist, "_ns"), { recursive: true });
   await writeFile(join(dist, "_ns/build.json"), JSON.stringify({ built: site.built, renderer: "astro" }));
   log.ok(`astro: ${pages.length} pages, ${Object.keys(local).length} external images localized`);

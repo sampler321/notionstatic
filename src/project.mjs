@@ -24,6 +24,7 @@ export const DEFAULTS = {
     hideTitleOn: [],        // more pages whose title + icon are hidden: titles or ids, "home" = root
     homeLink: null,         // label/icon for links to the home page on the site, e.g. { title: "Home", icon: "🏠" }
   },
+  optimizeImages: true, // WebP copies at several widths + srcset; originals kept for download
   favicon: null, // icon URL or project file (png/ico/svg); a { icon, apple } pair sets the apple-touch-icon too
   css: null,   // extra CSS file (path relative to the project)
   head: null,  // extra HTML file injected at the end of <head>

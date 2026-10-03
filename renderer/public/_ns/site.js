@@ -334,7 +334,7 @@
       return;
     }
     const zoom = e.target.closest("img[data-zoom]");
-    if (zoom) { e.preventDefault(); lightbox(zoom.currentSrc || zoom.src); return; }
+    if (zoom) { e.preventDefault(); lightbox(zoom.dataset.full || zoom.currentSrc || zoom.src); return; }
     const im = e.target.closest("[data-image-menu]");
     if (im) {
       e.preventDefault(); const src = im.dataset.imageMenu;

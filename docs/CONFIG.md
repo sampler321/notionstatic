@@ -65,3 +65,9 @@ export default {
 ```
 
 `custom.css` can target the astro renderer's classes, for example `.ns-link-u { opacity: 1; }` (links at full strength), `.ns-callout-box` (callouts, a callout whose only content is a link can be restyled as a button), `.ns-card` (gallery cards), and highlight spans such as `span[style*="--ca-bluBacSecTra"]`.
+
+## `optimizeImages` (default `true`)
+Every PNG/JPEG/WebP under `/_img` gets WebP copies at 96–2160px wide (never wider than the original, max 2560), and each `<img>` gets `srcset`/`sizes`, `width`/`height` and `data-full` (the largest copy, used by the lightbox). Copies are content-hashed under `/_img/o/`, cached between builds in `.notionstatic/imgcache`, and served with `Cache-Control: immutable` (via `_headers`). Originals stay for Download / View original. SVG and animated GIF are left as is. Set `false` to serve originals.
+
+## `favicon`
+A URL or project file, or `{ icon, apple }` for a separate apple-touch-icon.
