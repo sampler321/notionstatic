@@ -345,7 +345,7 @@ details[open] > summary .ns-toggle-arrow::before { transform: rotate(90deg); }
 /* ---------- floating outline ---------- */
 .ns-outline { position: fixed; top: 174px; inset-inline-end: 0; z-index: 10; display: flex; }
 /* Like Notion: at most 400px tall (scrolled by the script to keep the current dash in view). */
-.ns-outline-dashes { display: flex; flex-direction: column; gap: 12px; width: 56px; padding: 0 8px 12px 20px; max-height: min(400px, calc(100vh - 220px)); overflow: hidden; }
+.ns-outline-dashes { display: flex; flex-direction: column; gap: var(--ns-dash-gap, 12px); width: 56px; padding: 0 8px 12px 20px; max-height: calc(100vh - 214px); overflow: hidden; }
 .ns-dash { flex-shrink: 0; }
 /* Not enough room beside the content (narrow windows, full-width pages): hide it, as Notion does. */
 @media (max-width: 1080px) { .ns-outline { display: none; } }

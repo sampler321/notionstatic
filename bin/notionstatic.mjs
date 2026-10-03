@@ -8,8 +8,9 @@ import { log } from "../src/log.mjs";
 
 const HELP = `notionstatic <command> [options]
 
-  deploy            snapshot Notion, validate, apply theme, test locally, upload, test the
-                    preview URL, go live, test live (auto-rollback if that fails)
+  deploy            snapshot Notion, validate, apply theme, test locally, upload and go live
+    --check-live      also test the preview URL before going live and the live URL after
+                      (auto-rollback if that fails); slower
     --skip-snapshot   reuse the current snapshot (e.g. after changing only the theme)
     --force           deploy even if validation or the local test reports problems
   snapshot          crawl Notion into the project (validated before it replaces the current one)
@@ -141,17 +142,22 @@ async function doDeploy(p) {
   const preview = up.match(/Version Preview URL: (\S+)/)?.[1];
   if (!version) throw new Error(`upload failed:\n${up.slice(-800)}`);
   log.ok(`uploaded version ${version}`);
-  if (preview) {
+  if (preview && flag("--check-live")) {
     await warmUp(p, preview, site.built);
     const pre = await liveTest(p, preview, site.built, "Test preview");
     if (pre.length && !flag("--force")) throw new Error(`${pre.length} preview test failure(s); production was not touched (version ${version} stays unused)`);
-  } else log.warn("no preview URL (preview URLs disabled for this Worker); testing after going live");
+  } else if (flag("--check-live")) log.warn("no preview URL (preview URLs disabled for this Worker); testing after going live");
 
   log.head("Go live");
   const out = wrangler(p, ["versions", "deploy", `${version}@100%`, "--message", "notionstatic deploy", "-y"], { capture: true });
   const url = p.config.domain ? `https://${[].concat(p.config.domain)[0]}` : (out + up).match(/https:\/\/(?![0-9a-f]{8}-)[\w.-]+\.workers\.dev/)?.[0] || (preview && preview.replace(/^https:\/\/[0-9a-f]{8}-/, "https://"));
   log.ok(`version ${version} is live at ${url}`);
   if (!url) return;
+  if (!flag("--check-live")) {
+    await writeFile(join(p.dir, ".notionstatic/last-deploy.json"), JSON.stringify({ url, version, at: new Date().toISOString() }));
+    log.head(`Done: ${url}`);
+    return;
+  }
   // Production can take a minute or two to switch everywhere; retry before calling it broken.
   let live = [];
   for (let attempt = 1; attempt <= 3; attempt++) {

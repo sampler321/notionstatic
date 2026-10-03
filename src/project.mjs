@@ -21,7 +21,10 @@ export const DEFAULTS = {
     hide: ["share", "duplicate", "more", "getNotion"],
     applyToEmbeds: true,    // apply font to HTML embeds too
     hideHomeTitle: false,   // hide the home page title on the site (kept for SEO/screen readers)
+    hideTitleOn: [],        // more pages whose title + icon are hidden: titles or ids, "home" = root
+    homeLink: null,         // label/icon for links to the home page on the site, e.g. { title: "Home", icon: "🏠" }
   },
+  favicon: null, // icon URL or project file (png/ico/svg); a { icon, apple } pair sets the apple-touch-icon too
   css: null,   // extra CSS file (path relative to the project)
   head: null,  // extra HTML file injected at the end of <head>
   body: null,  // extra HTML file injected at the end of <body>

@@ -61,10 +61,34 @@ async function localFonts(font, project, site) {
   return css;
 }
 
+// Copies the configured favicon(s) to site/_custom and returns their site paths.
+async function saveFavicons(p) {
+  const conf = p.config.favicon;
+  if (!conf) return null;
+  const pair = typeof conf === "string" ? { icon: conf, apple: conf } : conf;
+  const out = {};
+  await mkdir(join(p.site, "_custom"), { recursive: true });
+  for (const [key, src] of Object.entries(pair)) {
+    if (!src) continue;
+    const ext = (src.split("?")[0].match(/\.(png|ico|svg|jpe?g|webp)$/i)?.[1] || "png").toLowerCase();
+    const name = `favicon-${key}.${ext}`;
+    let data;
+    if (/^https?:/.test(src)) {
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`favicon: ${src} returned ${res.status}`);
+      data = Buffer.from(await res.arrayBuffer());
+    } else data = await readFile(join(p.dir, src));
+    await writeFile(join(p.site, "_custom", name), data);
+    out[key] = { href: `/_custom/${name}`, type: { svg: "image/svg+xml", ico: "image/x-icon", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" }[ext] || "image/png" };
+  }
+  return out;
+}
+
 export async function build(p) {
   const { theme } = p.config;
   await rm(join(p.site, "_custom"), { recursive: true, force: true });
   const css = [];
+  const favicon = await saveFavicons(p);
 
   for (const key of theme.hide || []) {
     if (!HIDE[key]) throw new Error(`theme.hide: unknown "${key}" (known: ${Object.keys(HIDE).join(", ")})`);
@@ -124,7 +148,7 @@ body, .notion-body, #skeleton, .notion-app-inner.notion-light-theme { background
     head: await read(p.config.head),
     body: await read(p.config.body),
     embedCss: fontEmbedCss,
-    astro: { hideHomeTitle: !!theme.hideHomeTitle, fontFace, fontPreload: fontFace ? preloadsFrom(fontFace) : [], css: astroCss.join("\n") + "\n" + (await read(p.config.css)), head: await read(p.config.head), body: await read(p.config.body), embedCss: fontEmbedCss },
+    astro: { favicon, homeLink: theme.homeLink || null, hideHomeTitle: !!theme.hideHomeTitle, hideTitleOn: theme.hideTitleOn || [], fontFace, fontPreload: fontFace ? preloadsFrom(fontFace) : [], css: astroCss.join("\n") + "\n" + (await read(p.config.css)), head: await read(p.config.head), body: await read(p.config.body), embedCss: fontEmbedCss },
     built: new Date().toISOString(),
   };
   await mkdir(join(p.site, "_data"), { recursive: true });

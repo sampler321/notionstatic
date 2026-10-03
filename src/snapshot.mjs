@@ -192,6 +192,8 @@ export async function snapshot(p) {
     for (const u of imageQueue) { const k = imageKey(u); if (!byKey.has(k)) byKey.set(k, u); }
     log.step(`images: ${byKey.size}`);
     const externalFailed = [];
+    let previousImages = {};
+    try { previousImages = JSON.parse(readFileSync(join(p.site, "_data/manifest.json"), "utf8")).images || {}; } catch {}
     for (const [key, u] of byKey) {
       const src = key.slice("/image/".length, key.lastIndexOf("|"));
       const full = new URL(u); full.searchParams.delete("width"); full.searchParams.delete("w");
@@ -208,6 +210,17 @@ export async function snapshot(p) {
           break;
         }
         await sleep(3000 * (attempt + 1));
+      }
+      if (!images[key]) {
+        // Notion hiccup: reuse the copy from the last good snapshot when there is one (same key = same file).
+        const prev = previousImages[key];
+        if (prev && existsSync(join(p.site, prev.file))) {
+          await mkdir(dirname(join(OUT, prev.file)), { recursive: true });
+          await cp(join(p.site, prev.file), join(OUT, prev.file));
+          images[key] = prev;
+          log.warn(`image download failed, reused the copy from the last snapshot: ${key.slice(0, 70)}`);
+          continue;
+        }
       }
       if (!images[key]) {
         // An external image that is gone at its source can't be saved; it's a warning, not a blocker.

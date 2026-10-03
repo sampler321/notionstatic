@@ -5,10 +5,12 @@ Run from the project folder, or pass `--project <dir>` (also `$NOTIONSTATIC_PROJ
 ## `init <notion-url>`
 Writes `notionstatic.config.mjs` in the current folder, with the worker name derived from the URL slug. Fails if the file exists.
 
-## `deploy [--skip-snapshot] [--force]`
-Full pipeline (see ARCHITECTURE.md). Requires `npx wrangler login`.
+## `deploy [--skip-snapshot] [--force] [--check-live]`
+Snapshot, validate, build, test locally, upload and go live (see ARCHITECTURE.md). Requires `npx wrangler login`.
 - `--skip-snapshot`: reuse the current `site/`. It is still validated, so a missing image file is caught.
 - `--force`: continue despite validation, local-test or preview-test failures (a failed live test still rolls back).
+- `--check-live`: also smoke test the new version on its preview URL before it goes live, and the live URL after (3 tries, then auto-rollback). Off by default because it roughly doubles the deploy time; `notionstatic test <url>` runs the same check by hand.
+- A snapshot image whose download fails is taken from the previous snapshot when it has the same image; only images never downloaded block the deploy.
 
 ## `snapshot [--force]`
 Crawl Notion into staging, validate, and swap into `site/` only if complete. The old copy goes to `.notionstatic/previous`.

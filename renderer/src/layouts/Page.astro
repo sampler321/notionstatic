@@ -58,7 +58,9 @@ const coverSrc = f.page_cover ? load().image(f.page_cover, id) : null;
 const coverPos = `center ${Math.round((1 - (f.page_cover_position ?? 0.5)) * 100)}%`;
 const trailNames = crumbs.slice(0, -1).map((c) => crumbName(c));
 // theme.hideHomeTitle: the home title duplicates the top bar; keep it for SEO, hide it visually.
-const hideTitle = id === root && !!theme.hideHomeTitle;
+// theme.hideTitleOn: pages (titles or ids, "home" = root) whose title + icon are hidden on the site.
+const hideList = (theme.hideTitleOn || []).map((x) => String(x).toLowerCase().replace(/-/g, ""));
+const hideTitle = (id === root && (!!theme.hideHomeTitle || hideList.includes("home"))) || hideList.includes(name.toLowerCase()) || hideList.includes(id.replace(/-/g, ""));
 const canonical = hrefFor(id);
 ---
 <!doctype html>
@@ -76,6 +78,8 @@ const canonical = hrefFor(id);
   <script is:inline>if (location.search.indexOf("ns-preview") >= 0) document.documentElement.classList.add("ns-preview");</script>
   {/* Fonts: preload the Latin files and declare them in <head>, so text renders in the theme font
       from the first paint (no flash of a system font). */}
+  {theme.favicon?.icon && <link rel="icon" href={theme.favicon.icon.href} type={theme.favicon.icon.type} />}
+  {theme.favicon?.apple && <link rel="apple-touch-icon" href={theme.favicon.apple.href} />}
   {(theme.fontPreload || []).map((href) => <link rel="preload" as="font" type="font/woff2" href={href} crossorigin="anonymous" />)}
   {theme.fontFace && <style is:inline set:html={theme.fontFace} />}
   {theme.head && <Fragment set:html={theme.head} />}
@@ -105,8 +109,8 @@ const canonical = hrefFor(id);
   <main class="ns-page" class:list={[{ "ns-has-cover": !!coverSrc }]}>
     {/* Cover band (an empty one only shows in the search preview's miniature). */}
     <div class:list={["ns-cover", { "ns-cover-empty": !coverSrc }]}>{coverSrc && <img src={coverSrc} alt="" style={`object-position:${coverPos}`} />}</div>
-    <div class="ns-page-header" class:list={[{ "ns-has-icon": !!f.page_icon, "ns-no-title": hideTitle }]}>
-      {f.page_icon && <div class="ns-page-icon"><Icon icon={f.page_icon} blockId={id} size={78} box={78} /></div>}
+    <div class="ns-page-header" class:list={[{ "ns-has-icon": !!f.page_icon && !hideTitle, "ns-no-title": hideTitle }]}>
+      {f.page_icon && !hideTitle && <div class="ns-page-icon"><Icon icon={f.page_icon} blockId={id} size={78} box={78} /></div>}
       {trailNames.length > 0 && <div class="ns-page-trail">{trailNames.map((n, i) => (<>{i > 0 && <span class="ns-trail-sep">/</span>}<span>{n}</span></>))}</div>}
       <h1 class:list={["ns-title", { "ns-sr-only": hideTitle }]} data-block-id={id}>{name}</h1>
       {props.length > 0 && (

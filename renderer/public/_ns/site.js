@@ -381,15 +381,33 @@
   const links = [...document.querySelectorAll(".ns-outline-item")];
   const targets = links.map((a) => document.getElementById(a.getAttribute("href").slice(1)));
   if (dashes.length) {
+    const col = dashes[0].parentElement, panel = links[0]?.parentElement;
+    // Fit every dash in the window: shrink the gap (12px, down to 4px) on long pages; scroll the rest.
+    const fit = () => {
+      const room = innerHeight - 214 - 12, n = dashes.length;
+      const gap = n > 1 ? Math.max(4, Math.min(12, Math.floor((room - n * 2) / (n - 1)))) : 12;
+      col.style.setProperty("--ns-dash-gap", gap + "px");
+    };
     const update = () => {
       let i = 0;
-      targets.forEach((t, k) => { if (t && t.getBoundingClientRect().top < 140) i = k; });
+      // Headings in closed tabs/toggles aren't rendered (top = 0): skip them or the highlight sticks.
+      const live = targets.map((t) => (t && t.getClientRects().length ? t.getBoundingClientRect().top : null));
+      // The activation line sits 140px down, and slides to the bottom of the window over the last
+      // screen of scrolling, so the final headings (which can never reach the top) still light up in order.
+      const left = document.documentElement.scrollHeight - innerHeight - scrollY;
+      const line = 140 + Math.max(0, innerHeight - 140 - 24) * Math.max(0, 1 - left / innerHeight);
+      live.forEach((top, k) => { if (top !== null && top < line) i = k; });
       dashes.forEach((d, k) => d.classList.toggle("is-active", k === i));
-      // Keep the current dash in view when the outline is taller than its box.
-      const col = dashes[0].parentElement, a = dashes[i];
-      if (col.scrollHeight > col.clientHeight) col.scrollTop = Math.max(0, a.offsetTop - col.offsetTop - col.clientHeight / 2);
       links.forEach((d, k) => d.classList.toggle("is-active", k === i));
+      // Keep the current dash (and panel item) in view when the list is taller than its box.
+      const a = dashes[i];
+      if (col.scrollHeight > col.clientHeight) col.scrollTop = Math.max(0, a.offsetTop - col.offsetTop - col.clientHeight / 2);
+      if (panel && panel.scrollHeight > panel.clientHeight && links[i]) panel.scrollTop = Math.max(0, links[i].offsetTop - panel.clientHeight / 2);
     };
+    addEventListener("resize", () => { fit(); update(); });
+    // The panel is display:none until hover, so center its current item once it opens.
+    col.parentElement.addEventListener("mouseenter", () => requestAnimationFrame(update));
+    fit();
     addEventListener("scroll", update, { passive: true });
     update();
   }
